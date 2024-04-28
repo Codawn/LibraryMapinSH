@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="ol.css" type="text/css">
+    <style>
+        .map {
+            
+            /* height: 100%;*/
+            height: 800px; 
+            width: 100%;
+            position: relative;
+            
+            /* overflow: hidden;*/
+        }
+
+        .ol-popup {
+            position: absolute;
+            min-width: 180px;
+            background-color: white;
+            -webkit-filter: drop-shadow(0 1px 4px rgba(0,0,0,0.2));
+            filter: drop-shadow(0 1px 4px rgba(0,0,0,0.2));
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+            bottom: 12px;
+            left: -50px;
+            z-index: 1;
+        }
+
+        .ol-popup:after, .ol-popup:before {
+            top: 100%;
+            border: solid transparent;
+            content: " ";
+            height: 0;
+            width: 0;
+            position: absolute;
+            pointer-events: none;
+        }
+
+        .ol-popup:after {
+            border-top-color: white;
+            border-width: 10px;
+            left: 48px;
+            margin-left: -10px;
+        }
+
+        .ol-popup:before {
+            border-top-color: #cccccc;
+            border-width: 11px;
+            left: 48px;
+            margin-left: -11px;
+        }
+
+        .ol-popup-closer {
+            text-decoration: none;
+            position: absolute;
+            top: 2px;
+            right: 8px;
+        }
+
+        .ol-popup-closer:after {
+    content: "✖";
+}
+    </style>
+   
+    <title>闵行城市书房-demo20240428</title>
+  </head>
+  <body>
+    <h2>闵行城市书房分布图</h2>
+    <h5>数据采集与交互设计(微信：yourdawn)</h5>
+
+    
+
+    <div id="layerControl">
+        
+        
+        
+        <label><input type="checkbox" id="osmCheckbox" checked>OSM（需国际互联网）</label><br>
+        <label><input type="checkbox" id="googleCheckbox" checked>其他调试中</label><br>
+        <label><input type="checkbox" id="aMapRoadLabelCheckbox" checked>高德路网</label><br>
+        <label><input type="checkbox" id="aMapVecCheckbox" checked>高德矢量图</label><br>
+        <label><input type="checkbox" id="aMapImgCheckbox" checked>高德影像</label><br>
+    </div>
+
+    <div id="map" class="map"></div>
+
+    <div id="popup" class="ol-popup">
+            <a href="#" id="popup-closer" class="ol-popup-closer"></a>
+            <div id="popup-content"></div>
+    </div>
+
+    <script src="ol.js"></script>
+    <script type="text/javascript">
+      //标记物样式
+      var styles = {
+    'Point': [new ol.style.Style({
+        image: new ol.style.Circle({
+            radius: 8,
+            fill: new ol.style.Fill({
+                color: [255, 255, 255, 0.5]
+            }),
+            stroke: new ol.style.Stroke({color: '#0066FF', width: 2})
+        })
+    })],
+    'LineString': [new ol.style.Style({
+        stroke: new ol.style.Stroke({
+            color: 'green',
+            width: 1
+        })
+    })],
+    'Polygon': [new ol.style.Style({
+        stroke: new ol.style.Stroke({
+            color: 'blue',
+            lineDash: [4],
+            width: 3
+        }),
+        fill: new ol.style.Fill({
+            color: 'rgba(0, 0, 255, 0.1)'
+        })
+    })],
+    'Circle': [new ol.style.Style({
+        stroke: new ol.style.Stroke({
+            color: 'red',
+            width: 2
+        }),
+        fill: new ol.style.Fill({
+            color: 'rgba(255,0,0,0.2)'
+        })
+    })]
+};
+//设置标记物样式
+var styleFunction = function(feature, resolution) {
+  return styles[feature.getGeometry().getType()];
+};
+
+
+//地图链接准备
+var mapUrl = {
+    /****
+     * 高德地图
+     * lang可以通过zh_cn设置中文，en设置英文，size基本无作用，scl设置标注还是底图，scl=1代表注记，
+     * scl=2代表底图（矢量或者影像），style设置影像和路网，style=6为影像图，
+     * vec——街道底图
+     * img——影像底图
+     * roadLabel---路网+标注
+     */
+    "aMap-img": "http://webst0{1-4}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}",
+    "aMap-vec": "http://webrd0{1-4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}",
+    "aMap-roadLabel": "http://webst0{1-4}.is.autonavi.com/appmaptile?style=8&x={x}&y={y}&z={z}",
+    /***
+    *高德新版地图*
+    */
+    "aMap-vec-a": "http://wprd0{1-4}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=7", //为矢量图（含路网、含注记）
+ 
+    "aMap-img-n": "http://wprd0{1-4}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=6", //为影像底图（不含路网，不含注记）
+ 
+    "aMap-img-a": "http://wprd0{1-4}.is.autonavi.com/appmaptile?x={x}&y={y}&z={z}&lang=zh_cn&size=1&scl=1&style=8", //为影像路图（含路网，含注记）
+ 
+    /***
+     * 天地图 要key的
+     * vec——街道底图
+     * img——影像底图
+     * ter——地形底图
+     * cva——中文注记
+     * cta/cia——道路+中文注记 ---roadLabel
+     */
+    "tian-img": "http://t{0-7}.tianditu.gov.cn/DataServer?T=img_w&x={x}&y={y}&l={z}&tk=你的密钥",
+    "tian-roadLabel": "http://t{0-7}.tianditu.gov.cn/DataServer?T=cta_w&x={x}&y={y}&l={z}&tk=你的密钥",
+    "tian-label": "http://t{0-7}.tianditu.gov.cn/DataServer?T=cva_w&x={x}&y={y}&l={z}&tk=你的密钥",
+    "tian-vec": "http://t{0-7}.tianditu.gov.cn/DataServer?T=vec_w&x={x}&y={y}&l={z}&tk=你的密钥",
+    "tian-ter": "http://t{0-7}.tianditu.gov.cn/DataServer?T=ter_w&x={x}&y={y}&l={z}&tk=你的密钥",
+    /***
+     *geoq地图
+     * http://cache1.arcgisonline.cn
+     * http://map.geoq.cn
+     * vec：标准彩色地图
+     * gray、blue、warm
+     * line 中国轮廓图
+     * china 中国轮廓图+标注
+     * Hydro 水系
+     * green 植被
+     */
+    "geoq-vec": "http://cache1.arcgisonline.cn/arcgis/rest/services/ChinaOnlineCommunity/MapServer/tile/{z}/{y}/{x}",
+    "geoq-gray": "http://cache1.arcgisonline.cn/arcgis/rest/services/ChinaOnlineStreetGray/MapServer/tile/{z}/{y}/{x}",
+    "geoq-blue": "http://cache1.arcgisonline.cn/arcgis/rest/services/ChinaOnlineStreetPurplishBlue/MapServer/tile/{z}/{y}/{x}",
+    "geoq-warm": "http://cache1.arcgisonline.cn/arcgis/rest/services/ChinaOnlineStreetWarm/MapServer/tile/{z}/{y}/{x}",
+    "geoq-line": "http://cache1.arcgisonline.cn/arcgis/rest/services/SimpleFeature/ChinaBoundaryLine/MapServer/tile/{z}/{y}/{x}",//不稳定
+    "geoq-china": "http://thematic.geoq.cn/arcgis/rest/services/ThematicMaps/administrative_division_boundaryandlabel/MapServer/tile/{z}/{y}/{x}",//不稳定
+    "geoq-Hydro": "http://thematic.geoq.cn/arcgis/rest/services/ThematicMaps/WorldHydroMap/MapServer/tile/{z}/{y}/{x}",//不稳定
+    "geoq-green": "http://thematic.geoq.cn/arcgis/rest/services/ThematicMaps/vegetation/MapServer/tile/{z}/{y}/{x}",//不稳定
+    /***
+     * Google
+     * m 街道
+     * s 影像
+     */
+    "google-vec": "http://www.google.cn/maps/vt?lyrs=m@189&gl=cn&x={x}&y={y}&z={z}",
+    "google-img": "http://www.google.cn/maps/vt?lyrs=s@189&gl=cn&x={x}&y={y}&z={z}"
+ 
+};
+
+//定义了一个名为ol.source.onlineMap的自定义地图源，加载相应的地图图层，根据CH修改
+ol.source.OnlineMap = class extends ol.source.XYZ {
+    constructor(options) {
+        options = options ? options : {};
+
+        var attributions;
+        if (options.attributions !== undefined) {
+            attributions = option.attributions;
+        } else if (options.mapType.indexOf("aMap") != -1) {
+            attributions = new ol.control.Attribution({
+                html: '&copy; <a class="ol-attribution-amap" ' + 'href="http://ditu.amap.com/">' + '高德地图</a>'
+            });
+        } else if (options.mapType.indexOf("tian") != -1) {
+            attributions = new ol.control.Attribution({
+                html: '&copy; <a class="ol-attribution-tianmap" ' + 'href="http://www.tianditu.cn/">' + '天地图</a>'
+            });
+        } else if (options.mapType.indexOf("geoq") != -1) {
+            attributions = new ol.control.Attribution({
+                html: '&copy; <a class="ol-attribution-geoqmap" ' + 'href="http://www.geoq.net/basemap.html">' + '智图地图</a>'
+            });
+        } else if (options.mapType.indexOf("google") != -1) {
+            attributions = new ol.control.Attribution({
+                html: '&copy; <a class="ol-attribution-googlemap" ' + 'href="http://www.google.cn/maps">' + '谷歌地图</a>'
+            });
+        }
+        var url = mapUrl[options.mapType];
+        super({
+            crossOrigin: 'anonymous',
+            cacheSize: options.cacheSize,
+            projection: ol.proj.get('EPSG:3857'),
+            url: url,
+            attributions: attributions,
+            wrapX: options.wrapX !== undefined ? options.wrapX : true
+        });
+    }
+};
+
+
+
+
+
+//设置嵌入式数据（避免跨域）
+
+var geojson_data ={
+    "type": "FeatureCollection",
+    "crs": {
+        "type": "name",
+        "properties": {
+            "name": "EPSG:4326" 
+//在 GeoJSON 数据中，坐标使用的是经纬度坐标系（EPSG:4326），而在 OpenLayers 中，通常使用的是球面墨卡托投影坐标系（EPSG:3857）。
+        }
+    },
+    "features":  [{'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.38435374202446, 31.10749783799605])}, 'properties': {'name': '闵行城市书房闵图馆', 'description': '名都路85号一楼64605991'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.40009215925927, 31.008794759379597])}, 'properties': {'name': '闵行城市书房碧江馆', 'description': '鹤庆路900号9号楼64357734'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.41394005903453, 31.021619953198943])}, 'properties': {'name': '闵行城市书房凤凰馆', 'description': '石屏路 517号64357734'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.42738118946927, 31.014293012695088])}, 'properties': {'name': '闵行城市书房沧源馆', 'description': '德宏路2541号64357734'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.37858858960567, 31.00008354144768])}, 'properties': {'name': '闵行城市书房闵开发馆', 'description': '文井路105号64357734'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.37825581425163, 31.00105223512823])}, 'properties': {'name': '闵行城市书房闵开发智慧书房', 'description': '文井路135号64357734'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.40528081346201, 31.017802601197747])}, 'properties': {'name': '闵行城市书房金平馆', 'description': '金平路516号64357734'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.41612264190658, 31.003695181407995])}, 'properties': {'name': '闵行城市书房兰坪馆', 'description': '兰坪路158号64357734'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.39220201249329, 31.07412540103427])}, 'properties': {'name': '闵行城市书房光华馆', 'description': '光华路68号64890253'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.38011516251187, 31.070264533579333])}, 'properties': {'name': '闵行城市书房颛桥馆', 'description': '光华路728号B3号楼1楼64303255*273'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.41725385767413, 31.03770620699367])}, 'properties': {'name': '闵行城市书房北桥馆（即将开馆）', 'description': '都市路402号64303255*273'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.38225494350613, 31.133670824560223])}, 'properties': {'name': '闵行城市书房春江悦馆', 'description': '古美西路750号54933850'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.39134720560506, 31.143828160204922])}, 'properties': {'name': '闵行城市书房古美万源馆', 'description': '万源路550号 206室54933850'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.38328237654932, 31.02782594671207])}, 'properties': {'name': '闵行城市书房满天星馆', 'description': '银春路2150号1号楼101-A室64091548'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.36027340775824, 31.034086899403793])}, 'properties': {'name': '闵行城市书房三网馆', 'description': '马桥镇青年路33号64091548'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.37429158806334, 31.108152136486176])}, 'properties': {'name': '闵行城市书房莘庄馆', 'description': '莘松路380号64922678'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.35859280832422, 31.131205494092104])}, 'properties': {'name': '闵行城市书房莘社区馆', 'description': '黎康路 398号 城开·莘社区 2 号楼底楼64922678'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.48082424506124, 31.10326934213741])}, 'properties': {'name': '闵行城市书房江桦馆', 'description': '江桦路651号临34781923'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.5037652923784, 31.077294208769363])}, 'properties': {'name': '闵行城市书房世博馆', 'description': '联航路1926号34781923'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.50299970594605, 31.09930454625153])}, 'properties': {'name': '闵行城市书房浦心馆', 'description': '陈行公路2388号7号楼B164299895'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.50240328789094, 31.055039889978538])}, 'properties': {'name': '闵行城市书房浦江郊野馆', 'description': '浦星公路2578弄8号67285720'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.5182085042244, 31.03198212663051])}, 'properties': {'name': '闵行城市书房瑞和馆', 'description': '鲁坤路359号52238679'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.52865412016196, 31.06095336942745])}, 'properties': {'name': '闵行城市书房江玮馆', 'description': '江玮路269号34101018'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.345197732298, 31.169436748765484])}, 'properties': {'name': '闵行城市书房沪星馆', 'description': '航新路228号54850649'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.34963799069521, 31.15631503330924])}, 'properties': {'name': '闵行城市书房七宝馆', 'description': '横沥路108号古镇游客中心2楼54859960'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.30553013776857, 31.21151684485317])}, 'properties': {'name': '闵行城市书房新虹馆', 'description': '宁虹路1122号新虹图书馆一楼62210858'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.32496662761024, 31.175466164872635])}, 'properties': {'name': '闵行城市书房华翔公园馆', 'description': '申昆路291号华翔绿地内62210858'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.36440995717453, 31.172158021033493])}, 'properties': {'name': '闵行城市书房吴中路商圈馆', 'description': '吴中路1599号绿地64056200*133'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.38571113135514, 31.185328913739255])}, 'properties': {'name': '闵行城市书房基金小镇馆', 'description': '虹梅路3081号虹桥基金小镇41号64056200*133'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.3876932909478, 31.05607125335336])}, 'properties': {'name': '闵行城市书房鑫都馆', 'description': '鑫都路2717号52966923'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.3872223081635, 31.047067661138858])}, 'properties': {'name': '闵行城市书房天问书局馆', 'description': '元江路3883号上海航天创新创业中心4号楼52966923'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.40895883410931, 31.108547213274903])}, 'properties': {'name': '闵行城市书房兴梅馆', 'description': '兴梅路1123号34700268'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.40681534658385, 31.135064786095])}, 'properties': {'name': '闵行城市书房益梅馆', 'description': '益梅路91号43幢5-102室34700268'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.43760224085507, 31.044833823777534])}, 'properties': {'name': '闵行城市书房吴泾莲花馆', 'description': '曹家塘路399弄2号永德宝坻社区中心一层54630873'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.43302969710695, 31.039671290132897])}, 'properties': {'name': '闵行城市书房吴泾逐梦馆（即将开馆）', 'description': '育莲路66号一号楼9幢102（新黄浦·筑梦城人才公寓内）54630873'}}, {'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': ol.proj.fromLonLat([121.27813080342696, 31.20945546508178])}, 'properties': {'name': '闵行城市书房华漕馆', 'description': '幸乐路41-51号33509586'}}]
+}
+
+//获取数据加载到图层
+      var geojson_layer = new ol.layer.Vector({
+    source: new ol.source.Vector({
+        //url: 'file.geojson',
+        //直接读进来
+        features: (new ol.format.GeoJSON()).readFeatures(geojson_data)
+    
+    }),
+    style: styleFunction
+});
+
+//与底图拼接
+var map = new ol.Map({
+        target: document.getElementById('map'),
+        layers: [
+            new ol.layer.Tile({
+                    title: "aMapImg",
+                    visible: true,
+                    source: new ol.source.OnlineMap({ mapType: "aMap-img" })
+                }),
+                new ol.layer.Tile({
+                    title: "aMapVec",
+                    visible: false,
+                    source: new ol.source.OnlineMap({ mapType: "aMap-vec" })
+                }),
+                new ol.layer.Tile({
+                    title: "aMapRoadLabel",
+                    visible: false,
+                    source: new ol.source.OnlineMap({ mapType: "aMap-roadLabel" })
+                }),
+                new ol.layer.Tile({
+                    title: "osm",
+                    visible: false,
+                    source: new ol.source.OSM(),
+                    projection: 'EPSG:3857' // 添加这一行，指定地图投影
+            //source: new ol.source.XYZ({url: 'Tiles/{z}/{x}/{y}.png'})
+                }),
+                new ol.layer.Tile({
+                    title: "google",
+                    visible: true,
+                    source: new ol.source.OnlineMap({ mapType: "tian-vec" })
+                }),
+          geojson_layer
+        ],
+        view: new ol.View({
+          center: ol.proj.fromLonLat([121.37616941971295,31.114694999999998]),
+          zoom: 11
+        })
+      });
+
+      //设置交互
+
+//选框交互
+// 获取图层控制组件元素
+var layerControl = document.getElementById('layerControl');
+// 初始化复选框状态
+var layers = map.getLayers();
+        for (var i = 0; i < layers.getLength(); i++) {
+            var layer = layers.item(i);
+            var checkbox = document.getElementById(layer.get('title') + 'Checkbox');
+            //图层title必须只和<input>的id只差一个Checkbox 
+            //console.log(layer.get('title'), checkbox); 
+            if (checkbox) {
+                checkbox.checked = layer.getVisible();
+            }
+        }
+// 给复选框绑定事件
+layerControl.addEventListener('change', function(event) {
+            var checkbox = event.target;
+            var layerName = checkbox.id.replace('Checkbox', ''); // 获取图层名称
+
+            // 遍历地图的所有图层，找到与当前复选框对应的图层并设置其可见性
+            map.getLayers().forEach(function(layer) {
+                if (layer.get('title') === layerName) {
+                    layer.setVisible(checkbox.checked);
+                }
+            });
+        });
+//点击浮窗交互      
+var
+    container = document.getElementById('popup'),
+    content_element = document.getElementById('popup-content'),
+    closer = document.getElementById('popup-closer');
+
+closer.onclick = function() {
+    overlay.setPosition(undefined);
+    closer.blur();
+    return false;
+};
+var overlay = new ol.Overlay({
+    element: container,
+    autoPan: true,
+    offset: [0, -10]
+});
+map.addOverlay(overlay);
+
+var fullscreen = new ol.control.FullScreen();
+map.addControl(fullscreen);
+
+map.on('click', function(evt){
+    var feature = map.forEachFeatureAtPixel(evt.pixel,
+      function(feature, layer) {
+        return feature;
+      });
+    if (feature) {
+        var geometry = feature.getGeometry();
+        var coord = geometry.getCoordinates();
+        //var transformedCoord = ol.proj.fromLonLat(coord);
+        
+        var content = '<h3>' + feature.get('name') + '</h3>';
+        content += '<h5>' + feature.get('description') + '</h5>';
+        
+        content_element.innerHTML = content;
+        //overlay.setPosition(transformedCoord);
+        overlay.setPosition(coord);
+        console.info(feature.getProperties());
+    }
+});
+map.on('pointermove', function(e) {
+    if (e.dragging) return;
+       
+    var pixel = map.getEventPixel(e.originalEvent);
+    var hit = map.hasFeatureAtPixel(pixel);
+    
+    map.getTarget().style.cursor = hit ? 'pointer' : '';
+});
+
+
+
+    </script>
+  </body>
+</html>
